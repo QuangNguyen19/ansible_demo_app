@@ -1,0 +1,1 @@
+ansible-node ansible_host=192.168.231.134 ansible_user=root ansible_ssh_pass=dangquang

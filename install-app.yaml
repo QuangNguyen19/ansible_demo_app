@@ -1,0 +1,111 @@
+-
+  name: Pre-Requisites
+  hosts: ansible-node
+  tasks:
+    - name: Update yum 
+      command: yum -y update
+
+    - name: Install FirewallD
+      yum: name=firewalld state=present
+    
+    - name: Start and enable firewalld
+      service:
+        name: firewalld
+        state: started
+        enabled: yes
+
+- 
+  name: Deploy and Configure Database
+  hosts: ansible-node
+  tasks:
+    - name: Install MariaDB
+      yum: 
+        name: "{{ item }}"
+        state: present
+      with_items: 
+        - mariadb-server
+        - MySQL-python
+
+    - name: Enable and start mariadb-server
+      service:
+        name: mariadb-server
+        state: started
+        enabled: yes
+        
+    - name: Configure firewall for Database
+      firewalld:
+        port: 3306/tcp
+        zone: public
+        state: enabled
+        permanent: yes
+        immediate: yes
+
+    - name: Create a new database with name 'ecomdb'
+      community.mysql.mysql_db:
+        name: ecomdb
+        state: present
+
+    - name: Create user 'ecomuser'
+      community.mysql.mysql_user:
+        name: ecomuser
+        password: ecompassword
+        priv: 'ecomdb.*:ALL,GRANT'
+        state: present
+
+    - name: Copy SQL script to remote hosts
+      copy:
+        src: /mnt/d/Ansible/exercise-0-pingtest/db-load-script.sql
+        dest:  /var/lib/mysql/db-load-script.sql
+
+    - name: Check if 'products' table on 'ecomdb' or not
+      command: mysql -u ecomuser --password=ecompassword -e 'SHOW TABLES FROM ecomdb;'
+      register: products_table_status
+
+
+    - name: Run queries from SQL script
+      shell:
+        chdir: /var/lib/mysql/
+        cmd: mysql < db-load-script.sql
+      when: not products_table_status.stdout_lines is search("products")
+
+- 
+  name: Deploy and Configure Web
+  hosts: all
+  vars:
+    packages:
+      - name: httpd 
+      - name: php
+      - name: php-mysql
+
+  tasks:
+    - name: Install required packages
+      yum: name='{{ item.name }}' state=present
+      loop: '{{ packages }}'
+    
+    - name: Configure firewall
+      firewalld:
+        port: 80/tcp
+        zone: public
+        state: enabled
+        permanent: yes
+        immediate: yes
+
+    - name: Configure httpd
+      shell: sed -i 's/index.html/index.php/g' /etc/httpd/conf/httpd.conf
+    
+    - name: Start httpd
+      service: 
+        name: httpd
+        state: started
+        enabled: yes
+
+    - name: install git
+      yum: name=git state=present
+
+    - name: download code
+      git:
+        repo: 'https://github.com/kodekloudhub/learning-app-ecommerce.git'
+        dest: /var/www/html/
+
+    - name: Update index.php to right database index.php
+      shell: sudo sed -i 's/172.20.1.101/localhost/g' /var/www/html/index.php
